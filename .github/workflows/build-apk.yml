@@ -24,26 +24,67 @@ jobs:
         with:
           gradle-version: "8.7"
 
-      - name: Prepare project structure
+      - name: Auto-repair Gradle files and structure
         run: |
-          # ১. ফাইলগুলো যদি gatepay-sms/ ফোল্ডারের ভেতর থাকে, তাহলে রুট ডিরেক্টরিতে নিয়ে আসবে
+          # ১. ফাইলগুলো যদি gatepay-sms ফোল্ডারের ভেতরে থাকে, রুটে নিয়ে আসা
           if [ -d "gatepay-sms" ] && [ ! -f "settings.gradle.kts" ]; then
             echo "Moving files from gatepay-sms/ to root..."
             shopt -s dotglob
             mv gatepay-sms/* .
           fi
 
-          # ২. ফাইলগুলো যদি কোনো কারণে রুটে ফ্ল্যাটভাবে পেস্ট করা থাকে, স্বয়ংক্রিয়ভাবে app মডিউলে সাজাবে
-          if [ -f "MainActivity.kt" ] && [ ! -d "app/src/main/java/world/gatepay/sms" ]; then
-            echo "Reorganizing flat files into standard Android structure..."
-            mkdir -p app/src/main/java/world/gatepay/sms
-            mkdir -p app/src/main/res/values
-            mkdir -p app/src/main/res/drawable
-            mv *.kt app/src/main/java/world/gatepay/sms/ 2>/dev/null || true
-            [ -f "AndroidManifest.xml" ] && mv AndroidManifest.xml app/src/main/
-            [ -f "colors.xml" ] && mv colors.xml app/src/main/res/values/
-            [ -f "ic_app.xml" ] && mv ic_app.xml app/src/main/res/drawable/
-          fi
+          # ২. app ডিরেক্টরি নিশ্চিত করা
+          mkdir -p app/src/main/java/world/gatepay/sms
+          mkdir -p app/src/main/res/values
+          mkdir -p app/src/main/res/drawable
+
+          # ৩. কোনো ফাইল রুটে ফ্ল্যাটভাবে থাকলে সেগুলোকে app মডিউলে স্থানান্তর
+          mv *.kt app/src/main/java/world/gatepay/sms/ 2>/dev/null || true
+          [ -f "AndroidManifest.xml" ] && mv AndroidManifest.xml app/src/main/ 2>/dev/null || true
+          [ -f "colors.xml" ] && mv colors.xml app/src/main/res/values/ 2>/dev/null || true
+          [ -f "ic_app.xml" ] && mv ic_app.xml app/src/main/res/drawable/ 2>/dev/null || true
+
+          # ৪. app/build.gradle.kts নিশ্চিত করা
+          cat << 'EOF' > app/build.gradle.kts
+          plugins { id("com.android.application"); id("org.jetbrains.kotlin.android") }
+          android {
+              namespace = "world.gatepay.sms"
+              compileSdk = 34
+              defaultConfig {
+                  applicationId = "world.gatepay.sms"
+                  minSdk = 24; targetSdk = 34
+                  versionCode = 3; versionName = "3.0.0"
+                  buildConfigField("String", "API_URL", "\"https://zazpdfjefmcfdqhuhhkj.supabase.co/functions/v1/sms-listener\"")
+              }
+              buildFeatures { buildConfig = true }
+              buildTypes { release { isMinifyEnabled = false } }
+              compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
+              kotlinOptions { jvmTarget = "17" }
+          }
+          dependencies { implementation("androidx.core:core-ktx:1.13.1") }
+          EOF
+
+          # ৫. রুটের build.gradle.kts ফাইলে সঠিক ভার্সন দিয়ে ফিক্স করা (এরর রোধ করতে)
+          cat << 'EOF' > build.gradle.kts
+          plugins {
+              id("com.android.application") version "8.5.2" apply false
+              id("org.jetbrains.kotlin.android") version "1.9.24" apply false
+          }
+          EOF
+
+          # ৬. রুটের settings.gradle.kts নিশ্চিত করা
+          cat << 'EOF' > settings.gradle.kts
+          pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }
+          dependencyResolutionManagement { repositories { google(); mavenCentral() } }
+          rootProject.name = "GatePaySMS"
+          include(":app")
+          EOF
+
+          # ৭. gradle.properties নিশ্চিত করা
+          cat << 'EOF' > gradle.properties
+          org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
+          android.useAndroidX=true
+          EOF
 
       - name: Build Debug APK
         run: gradle :app:assembleDebug --stacktrace
